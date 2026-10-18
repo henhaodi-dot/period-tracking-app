@@ -29,6 +29,7 @@ const icons = {
 };
 
 let currentScreen = 'today';
+let routeVersion = 0;
 
 async function init() {
   const savedLang = await db.getSetting('language');
@@ -40,9 +41,14 @@ async function init() {
     return;
   }
 
+  startRouting();
+}
+
+function startRouting() {
+  window.removeEventListener('hashchange', route);
+  window.addEventListener('hashchange', route);
   buildNav();
   route();
-  window.addEventListener('hashchange', route);
 }
 
 function showOnboarding() {
@@ -52,9 +58,8 @@ function showOnboarding() {
 
   window.__onboardingComplete = () => {
     if (nav) nav.style.display = '';
-    buildNav();
-    location.hash = '#today';
-    route();
+    history.replaceState(null, '', '#today');
+    startRouting();
   };
 
   renderOnboarding(app, window.__onboardingComplete);
@@ -85,6 +90,7 @@ function buildNav() {
 }
 
 async function route() {
+  const version = ++routeVersion;
   const hash = location.hash.slice(1) || 'today';
   currentScreen = hash;
 
@@ -101,13 +107,18 @@ async function route() {
   };
 
   const renderer = renderers[hash];
-  if (renderer) {
-    await renderer(app);
-  } else {
-    await renderToday(app);
-    currentScreen = 'today';
+  try {
+    if (renderer) {
+      await renderer(app);
+    } else {
+      await renderToday(app);
+      currentScreen = 'today';
+    }
+  } catch (err) {
+    console.error('Route render failed:', err);
   }
 
+  if (version !== routeVersion) return;
   buildNav();
 }
 

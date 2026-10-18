@@ -33,6 +33,31 @@ const MOODS = [
 ];
 
 let log = {};
+let saveTimer = null;
+
+// Pull context inputs into the log. Skipped once the screen is gone so a
+// late save can't overwrite stored values with nulls.
+function readContext(target) {
+  if (!document.getElementById('ctx-sleep')) return;
+  target.context.sleepHours = parseNum(document.getElementById('ctx-sleep').value);
+  target.context.nightWakings = parseNum(document.getElementById('ctx-wakings')?.value);
+  target.context.stress = document.getElementById('ctx-stress')?.value || null;
+  const nursing = document.getElementById('ctx-nursing');
+  if (nursing) target.context.nursingSessions = parseNum(nursing.value);
+}
+
+function autoSave() {
+  clearTimeout(saveTimer);
+  const pending = log;
+  readContext(pending);
+  saveTimer = setTimeout(async () => {
+    try {
+      await db.saveDayLog(pending);
+      const ind = document.getElementById('save-ind');
+      if (ind) { ind.classList.add('visible'); setTimeout(() => ind.classList.remove('visible'), 1500); }
+    } catch (_) {}
+  }, 300);
+}
 
 export async function render(container) {
   const todayStr = today();
@@ -176,6 +201,7 @@ export async function render(container) {
         log.bleeding[field] = log.bleeding[field] === val ? null : val;
         btn.closest('.pill-group').querySelectorAll('.pill').forEach(p => p.classList.remove('selected'));
         if (log.bleeding[field]) btn.classList.add('selected');
+        autoSave();
       });
     });
   });
@@ -191,6 +217,7 @@ export async function render(container) {
         log.symptoms.push(id);
         btn.classList.add('selected');
       }
+      autoSave();
     });
   });
 
@@ -205,6 +232,7 @@ export async function render(container) {
         log.mood.push(id);
         btn.classList.add('selected');
       }
+      autoSave();
     });
   });
 
@@ -215,18 +243,21 @@ export async function render(container) {
       log.discharge = log.discharge === val ? null : val;
       btn.closest('.pill-group').querySelectorAll('.pill').forEach(p => p.classList.remove('selected'));
       if (log.discharge) btn.classList.add('selected');
+      autoSave();
     });
   });
 
-  // Save
+  // Auto-save context fields on change
+  ['ctx-sleep', 'ctx-wakings', 'ctx-stress', 'ctx-nursing'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => autoSave());
+  });
+
+  // Save button (immediate, with toast)
   container.querySelector('#save-log').addEventListener('click', async () => {
-    log.context.sleepHours = parseNum(document.getElementById('ctx-sleep')?.value);
-    log.context.nightWakings = parseNum(document.getElementById('ctx-wakings')?.value);
-    log.context.stress = document.getElementById('ctx-stress')?.value || null;
-    log.context.nursingSessions = parseNum(document.getElementById('ctx-nursing')?.value);
+    clearTimeout(saveTimer);
+    readContext(log);
     await db.saveDayLog(log);
-    const ind = document.getElementById('save-ind');
-    if (ind) { ind.classList.add('visible'); setTimeout(() => ind.classList.remove('visible'), 2000); }
     showToast(t('saved'));
   });
 }

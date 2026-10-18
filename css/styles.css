@@ -141,6 +141,8 @@ nav button {
   font-size: 10px;
   color: var(--text-muted);
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(0,0,0,0.1);
   padding: var(--space-sm) 0;
   transition: color 0.15s;
   font-family: var(--font-body);
@@ -158,6 +160,11 @@ nav button svg {
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
+  pointer-events: none;
+}
+
+nav button span {
+  pointer-events: none;
 }
 
 /* === Cards === */

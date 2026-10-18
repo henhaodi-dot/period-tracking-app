@@ -26,17 +26,32 @@ function open() {
         db.createObjectStore('settings', { keyPath: 'key' });
       }
     };
-    req.onsuccess = e => { dbInstance = e.target.result; resolve(dbInstance); };
+    req.onsuccess = e => {
+      dbInstance = e.target.result;
+      dbInstance.onclose = () => { dbInstance = null; };
+      dbInstance.onversionchange = () => { dbInstance.close(); dbInstance = null; };
+      resolve(dbInstance);
+    };
     req.onerror = e => reject(e.target.error);
   });
 }
 
-function tx(store, mode = 'readonly') {
-  return open().then(db => {
+async function tx(store, mode = 'readonly') {
+  let db = await open();
+  try {
     const t = db.transaction(store, mode);
     const s = Array.isArray(store) ? store.map(n => t.objectStore(n)) : t.objectStore(store);
     return { tx: t, store: s };
-  });
+  } catch (e) {
+    if (e.name === 'InvalidStateError') {
+      dbInstance = null;
+      db = await open();
+      const t = db.transaction(store, mode);
+      const s = Array.isArray(store) ? store.map(n => t.objectStore(n)) : t.objectStore(store);
+      return { tx: t, store: s };
+    }
+    throw e;
+  }
 }
 
 function req(r) {
