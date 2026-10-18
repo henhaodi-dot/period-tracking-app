@@ -469,6 +469,7 @@ nav button span {
 
 .date-entry {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-sm);
   margin-bottom: var(--space-md);
@@ -498,7 +499,25 @@ nav button span {
   white-space: nowrap;
 }
 
+.date-entry-fields {
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.date-entry .date-field span {
+  width: 2.5em;
+  flex-shrink: 0;
+}
+
+.date-entry .date-field input[type="date"] {
+  min-width: 0;
+}
+
 .date-entry .remove-btn {
+  margin-left: auto;
   background: none;
   border: none;
   color: var(--text-muted);
@@ -970,4 +989,39 @@ input[type="checkbox"] {
   width: 16px;
   height: 16px;
   accent-color: var(--phase-accent);
+}
+
+/* === Period form === */
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-md);
+}
+
+.form-field input[type="date"] {
+  padding: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.form-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.form-error {
+  min-height: 1.2em;
+  margin: var(--space-sm) 0;
+  font-size: 0.8rem;
+  color: #b5543c;
 }

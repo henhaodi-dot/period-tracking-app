@@ -185,6 +185,17 @@ export async function getSettings() {
   return out;
 }
 
+// Writes a rebuilt cycle chain and the day logs / journal entries it re-linked
+// in one transaction, so an interrupted edit can't leave the chain half-updated.
+export async function saveCycleChain({ cycles, deletedIds = [], dayLogs = [], journal = [] }) {
+  const { tx: t, store: [cs, dl, j] } = await tx(['cycles', 'dayLogs', 'journal'], 'readwrite');
+  for (const id of deletedIds) cs.delete(id);
+  for (const c of cycles) cs.put(c);
+  for (const d of dayLogs) dl.put(d);
+  for (const e of journal) j.put(e);
+  await txComplete(t);
+}
+
 // --- Export / Import ---
 
 export async function exportAll() {

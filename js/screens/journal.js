@@ -1,6 +1,6 @@
 import { t, getLanguage } from '../i18n.js';
 import * as db from '../db.js';
-import { today, daysBetween, getPhase, predictNextPeriod, estimateOvulationActive, defaultOvulationDay } from '../cycle-math.js';
+import { today, daysBetween, getPhase, predictNextPeriod, estimateOvulationActive, defaultOvulationDay, periodLengthDays } from '../cycle-math.js';
 import { phaseInfo } from '../tcm.js';
 
 let viewMode = 'write'; // 'write' | 'list' | 'phase-filter'
@@ -20,7 +20,7 @@ export async function render(container) {
     const prediction = predictNextPeriod(cycles, breastfeeding);
     const predictedLength = prediction ? prediction.predictedLength : 28;
     const ovDayNum = defaultOvulationDay(predictedLength);
-    phase = getPhase(cycleDay, ovDayNum, predictedLength);
+    phase = getPhase(cycleDay, ovDayNum, predictedLength, periodLengthDays(activeCycle));
   }
 
   const info = phaseInfo[phase];

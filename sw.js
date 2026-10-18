@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'cycle-v4';
+const CACHE_VERSION = 'cycle-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -10,6 +10,7 @@ const ASSETS = [
   './js/hormone-model.js',
   './js/tcm.js',
   './js/i18n.js',
+  './js/modal.js',
   './js/screens/today.js',
   './js/screens/log.js',
   './js/screens/onboarding.js',

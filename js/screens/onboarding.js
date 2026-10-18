@@ -1,6 +1,6 @@
 import { t, setLanguage, getLanguage } from '../i18n.js';
 import * as db from '../db.js';
-import { daysBetween, predictCycleLength, uncertaintyBand, getClosedIntervals, addDays, fmt, today } from '../cycle-math.js';
+import { daysBetween, predictCycleLength, uncertaintyBand, getClosedIntervals, addDays, fmt, today, validatePeriod } from '../cycle-math.js';
 
 let dates = [];
 let step = 1; // 1=dates, 2=profile, 3=results
@@ -8,7 +8,22 @@ let warnings = [];
 let breastfeeding = false;
 let constitution = { thermal: 'neutral' };
 
-export function render(container, onComplete) {
+// Progress is saved on every change, so closing or reloading the page before
+// Finish doesn't throw away the dates already entered.
+const DRAFT_KEY = 'onboardingDraft';
+let draftLoaded = false;
+
+function saveDraft() {
+  db.setSetting(DRAFT_KEY, { dates, step, warnings, breastfeeding, constitution }).catch(() => {});
+}
+
+export async function render(container, onComplete) {
+  if (!draftLoaded) {
+    draftLoaded = true;
+    const draft = await db.getSetting(DRAFT_KEY).catch(() => null);
+    if (draft) ({ dates, step, warnings, breastfeeding, constitution } = draft);
+  }
+  saveDraft();
   if (step === 1) renderDates(container, onComplete);
   else if (step === 2) renderProfile(container, onComplete);
   else renderResults(container, onComplete);
@@ -30,13 +45,14 @@ function renderDates(container, onComplete) {
   `;
 
   if (dates.length === 0) {
-    dates.push({ date: '', approximate: false });
+    dates.push({ date: '', end: '', approximate: false });
   }
 
   renderDateEntries();
 
   container.querySelector('#add-date').addEventListener('click', () => {
-    dates.push({ date: '', approximate: false });
+    dates.push({ date: '', end: '', approximate: false });
+    saveDraft();
     renderDateEntries();
   });
 
@@ -45,6 +61,13 @@ function renderDates(container, onComplete) {
     if (filled.length === 0) return;
     filled.sort((a, b) => b.date.localeCompare(a.date));
     dates = filled;
+    const asCycles = filled.map((d, i) => ({ id: i, startDate: d.date, periodEnd: d.end || null }));
+    const err = asCycles.map(c => validatePeriod(asCycles, c.id, c.startDate, c.periodEnd)).find(Boolean);
+    if (err) {
+      renderDateEntries();
+      document.getElementById('warnings').innerHTML = `<p class="form-error">${t(err.key, err.vars)}</p>`;
+      return;
+    }
     warnings = validateIntervals(dates);
     if (warnings.length > 0) {
       renderWarnings();
@@ -60,8 +83,15 @@ function renderDateEntries() {
   if (!el) return;
   el.innerHTML = dates.map((d, i) => `
     <div class="date-entry">
-      <input type="date" value="${d.date}" data-idx="${i}" class="date-input" max="${today()}">
-      <label>
+      <div class="date-entry-fields">
+        <label class="date-field"><span>${t('periodStartShort')}</span>
+          <input type="date" value="${d.date}" data-idx="${i}" class="date-input" max="${today()}">
+        </label>
+        <label class="date-field"><span>${t('periodEndShort')}</span>
+          <input type="date" value="${d.end || ''}" data-idx="${i}" class="end-input" max="${today()}">
+        </label>
+      </div>
+      <label class="approx-label">
         <input type="checkbox" ${d.approximate ? 'checked' : ''} data-idx="${i}" class="approx-check">
         ${t('onboardingApproximate')}
       </label>
@@ -69,19 +99,21 @@ function renderDateEntries() {
     </div>
   `).join('');
 
-  el.querySelectorAll('.date-input').forEach(inp => {
-    inp.addEventListener('change', e => {
-      dates[+e.target.dataset.idx].date = e.target.value;
-    });
+  const bind = (selector, field, prop) => el.querySelectorAll(selector).forEach(inp => {
+    for (const type of ['input', 'change']) {
+      inp.addEventListener(type, e => {
+        dates[+e.target.dataset.idx][field] = e.target[prop];
+        saveDraft();
+      });
+    }
   });
-  el.querySelectorAll('.approx-check').forEach(cb => {
-    cb.addEventListener('change', e => {
-      dates[+e.target.dataset.idx].approximate = e.target.checked;
-    });
-  });
+  bind('.date-input', 'date', 'value');
+  bind('.end-input', 'end', 'value');
+  bind('.approx-check', 'approximate', 'checked');
   el.querySelectorAll('.remove-btn').forEach(btn => {
     btn.addEventListener('click', e => {
       dates.splice(+e.target.dataset.idx, 1);
+      saveDraft();
       renderDateEntries();
     });
   });
@@ -195,6 +227,7 @@ async function renderResults(container, onComplete) {
       startDate,
       endDate,
       lengthDays,
+      periodEnd: sorted[i].end || null,
       estimatedOvulation: endDate ? addDays(endDate, -13) : null,
       ovulationConfidence: 'low',
       anovulatorySuspected: false,
@@ -259,8 +292,10 @@ async function renderResults(container, onComplete) {
     await db.setSetting('constitution', constitution);
     await db.setSetting('language', getLanguage());
     await db.setSetting('onboarded', true);
+    await db.setSetting(DRAFT_KEY, null);
     step = 1;
     dates = [];
+    warnings = [];
     if (onComplete) onComplete();
   });
 }
