@@ -1,7 +1,7 @@
 import { t, getLanguage } from '../i18n.js';
 import * as db from '../db.js';
 import { generateCycleCurve, ovulationSpreadDays } from '../hormone-model.js';
-import { daysBetween, addDays, today, defaultOvulationDay } from '../cycle-math.js';
+import { daysBetween, addDays, today, defaultOvulationDay, predictNextPeriod } from '../cycle-math.js';
 
 let selectedCycleId = null;
 
@@ -13,7 +13,7 @@ export async function render(container) {
   if (selectedCycleId) {
     const cycle = sorted.find(c => c.id === selectedCycleId);
     if (cycle) {
-      await renderDetail(container, cycle);
+      await renderDetail(container, cycle, cycles);
       return;
     }
     selectedCycleId = null;
@@ -52,17 +52,26 @@ export async function render(container) {
   });
 }
 
-async function renderDetail(container, cycle) {
+async function renderDetail(container, cycle, cycles) {
   const lang = getLanguage();
   const dayLogs = await db.getDayLogsForCycle(cycle.id);
   const journalEntries = await db.getJournalEntriesForCycle(cycle.id);
 
   const lengthDays = cycle.lengthDays || (cycle.endDate ? daysBetween(cycle.startDate, cycle.endDate) : daysBetween(cycle.startDate, today()));
-  const ovDay = cycle.estimatedOvulation ? daysBetween(cycle.startDate, cycle.estimatedOvulation) + 1 : defaultOvulationDay(lengthDays);
 
   let chartSvg = '';
-  if (cycle.endDate || lengthDays > 5) {
-    chartSvg = renderHormoneChart(lengthDays, ovDay, cycle.ovulationConfidence || 'low');
+  if (cycle.endDate) {
+    const ovDay = cycle.estimatedOvulation ? daysBetween(cycle.startDate, cycle.estimatedOvulation) + 1 : defaultOvulationDay(lengthDays);
+    chartSvg = renderHormoneChart(lengthDays, ovDay, ovulationSpreadDays(cycle.ovulationConfidence || 'low'));
+  } else {
+    // Active cycle: elapsed days aren't the cycle length. Chart the predicted
+    // cycle with the same ovulation anchor and spread as Today, and mark today.
+    const breastfeeding = !!(await db.getSetting('breastfeeding'));
+    const prediction = predictNextPeriod(cycles, breastfeeding);
+    const predictedLength = prediction ? prediction.predictedLength : 28;
+    const cycleDay = lengthDays + 1;
+    chartSvg = renderHormoneChart(Math.max(predictedLength, cycleDay), defaultOvulationDay(predictedLength),
+      ovulationSpreadDays('low', breastfeeding), cycleDay);
   }
 
   container.innerHTML = `
@@ -107,14 +116,14 @@ async function renderDetail(container, cycle) {
   });
 }
 
-function renderHormoneChart(lengthDays, ovDay, confidence) {
+function renderHormoneChart(lengthDays, ovDay, spreadDays, todayDay = null) {
   const W = Math.max(320, lengthDays * 14);
   const H = 160;
   const pad = { top: 20, right: 10, bottom: 30, left: 10 };
   const plotW = W - pad.left - pad.right;
   const plotH = H - pad.top - pad.bottom;
 
-  const curve = generateCycleCurve(lengthDays, ovDay, null, ovulationSpreadDays(confidence));
+  const curve = generateCycleCurve(lengthDays, ovDay, null, spreadDays);
   const xScale = d => pad.left + ((d - 1) / (lengthDays - 1)) * plotW;
   const yScale = v => pad.top + (1 - v) * plotH;
 
@@ -133,7 +142,12 @@ function renderHormoneChart(lengthDays, ovDay, confidence) {
 
   // Ovulation marker
   const ovX = xScale(ovDay);
-  const ovLine = `<line x1="${ovX}" y1="${pad.top}" x2="${ovX}" y2="${pad.top + plotH}" stroke="var(--text-muted)" stroke-width="0.5" stroke-dasharray="3,3"/>`;
+  let ovLine = `<line x1="${ovX}" y1="${pad.top}" x2="${ovX}" y2="${pad.top + plotH}" stroke="var(--text-muted)" stroke-width="0.5" stroke-dasharray="3,3"/>`;
+  if (todayDay) {
+    const tx = xScale(todayDay);
+    ovLine += `<line x1="${tx}" y1="${pad.top}" x2="${tx}" y2="${pad.top + plotH}" stroke="var(--text-secondary)" stroke-width="1"/>`;
+    ovLine += `<text x="${tx + 3}" y="${pad.top + 8}" fill="var(--text-secondary)" font-size="8">${getLanguage() === 'zh' ? '今天' : 'Today'}</text>`;
+  }
 
   // X axis labels
   let xLabels = '';
