@@ -1,7 +1,7 @@
 import { t, bilingualPhase, getLanguage } from '../i18n.js';
 import * as db from '../db.js';
-import { today, daysBetween, getPhase, predictNextPeriod, estimateOvulationActive, addDays, reanchorCycle } from '../cycle-math.js';
-import { getHormoneLevels, prolactinFromNursing, confidenceBandWidth } from '../hormone-model.js';
+import { today, daysBetween, getPhase, predictNextPeriod, estimateOvulationActive, addDays, reanchorCycle, defaultOvulationDay } from '../cycle-math.js';
+import { getHormoneLevels, prolactinFromNursing, ovulationSpreadDays } from '../hormone-model.js';
 import { phaseInfo, getRemediesForPhase } from '../tcm.js';
 
 export async function render(container) {
@@ -31,14 +31,14 @@ export async function render(container) {
   const prediction = predictNextPeriod(cycles, breastfeeding);
   const predictedLength = prediction ? prediction.predictedLength : 28;
   const ovDay = estimateOvulationActive(activeCycle, predictedLength);
-  const ovDayNum = ovDay ? daysBetween(activeCycle.startDate, ovDay) + 1 : predictedLength - 13;
+  const ovDayNum = ovDay ? daysBetween(activeCycle.startDate, ovDay) + 1 : defaultOvulationDay(predictedLength);
   const phase = getPhase(cycleDay, ovDayNum, predictedLength);
-  const hormones = getHormoneLevels(cycleDay, ovDayNum, predictedLength);
+  // The active-cycle estimate is calendar-only (no marker nudge), so 'low'.
+  const hormones = getHormoneLevels(cycleDay, ovDayNum, predictedLength, ovulationSpreadDays('low', breastfeeding));
 
   const todayLog = await db.getDayLog(todayStr);
   const nursing = todayLog?.context?.nursingSessions;
   const prolactin = breastfeeding ? prolactinFromNursing(nursing ?? 6) : null;
-  const confWidth = confidenceBandWidth('low', breastfeeding);
 
   document.documentElement.dataset.phase = phase;
 
@@ -63,11 +63,11 @@ export async function render(container) {
           <span class="card-title">${t('hormoneSnapshot')}</span>
         </div>
         <div class="hormone-bars">
-          ${hormoneBar(t('estrogen'), hormones.estrogen, 'estrogen', confWidth)}
-          ${hormoneBar(t('progesterone'), hormones.progesterone, 'progesterone', confWidth)}
-          ${hormoneBar(t('lhLabel'), hormones.lh, 'lh', confWidth)}
-          ${hormoneBar(t('fshLabel'), hormones.fsh, 'fsh', confWidth)}
-          ${prolactin !== null ? hormoneBar(t('prolactinLabel'), prolactin, 'prolactin', 0) : ''}
+          ${hormoneBar(t('estrogen'), hormones.estrogen, 'estrogen', hormones.range.estrogen)}
+          ${hormoneBar(t('progesterone'), hormones.progesterone, 'progesterone', hormones.range.progesterone)}
+          ${hormoneBar(t('lhLabel'), hormones.lh, 'lh', hormones.range.lh)}
+          ${hormoneBar(t('fshLabel'), hormones.fsh, 'fsh', hormones.range.fsh)}
+          ${prolactin !== null ? hormoneBar(t('prolactinLabel'), prolactin, 'prolactin', null) : ''}
         </div>
         <div class="model-note">${t('modelNotMeasurement')}</div>
       </div>
@@ -137,16 +137,17 @@ export async function render(container) {
   container.querySelector('#end-period-btn')?.addEventListener('click', () => endCurrentPeriod(activeCycle));
 }
 
-function hormoneBar(label, value, cls, confWidth) {
+// range: [lo, hi] spread of plausible levels given ovulation-day uncertainty
+function hormoneBar(label, value, cls, range) {
   const pct = Math.round(value * 100);
-  const confStart = Math.max(0, pct - confWidth * 100);
-  const confEnd = Math.min(100, pct + confWidth * 100);
+  const confStart = range ? Math.round(range[0] * 100) : 0;
+  const confEnd = range ? Math.round(range[1] * 100) : 0;
   return `
     <div class="hormone-row">
       <span class="hormone-label">${label}</span>
       <div class="hormone-bar-track">
         <div class="hormone-bar-fill ${cls}" style="width:${pct}%"></div>
-        ${confWidth > 0 ? `<div class="hormone-confidence" style="left:${confStart}%;width:${confEnd - confStart}%"></div>` : ''}
+        ${confEnd > confStart ? `<div class="hormone-confidence" style="left:${confStart}%;width:${confEnd - confStart}%"></div>` : ''}
       </div>
     </div>
   `;

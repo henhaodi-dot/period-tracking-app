@@ -1,6 +1,6 @@
 import { t, getLanguage } from '../i18n.js';
 import * as db from '../db.js';
-import { today, daysBetween, getPhase, estimateOvulationActive, predictNextPeriod } from '../cycle-math.js';
+import { today, daysBetween, getPhase, estimateOvulationActive, predictNextPeriod, defaultOvulationDay } from '../cycle-math.js';
 
 const SYMPTOMS = [
   { id: 'head-distension', key: 'symptomHeadDistension' },
@@ -71,7 +71,7 @@ export async function render(container) {
   const cycleDay = activeCycle ? daysBetween(activeCycle.startDate, todayStr) + 1 : null;
   const prediction = activeCycle ? predictNextPeriod(cycles, breastfeeding) : null;
   const predictedLength = prediction ? prediction.predictedLength : 28;
-  const ovDayNum = activeCycle ? predictedLength - 13 : 14;
+  const ovDayNum = activeCycle ? defaultOvulationDay(predictedLength) : 14;
   const phase = cycleDay ? getPhase(cycleDay, ovDayNum, predictedLength) : 'follicular';
 
   log = existing || {

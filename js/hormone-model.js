@@ -1,12 +1,64 @@
 // Hormone curves: normalized 0–1 relative values, anchored to ovulation.
 // These are models, not measurements.
 
-import { daysBetween } from './cycle-math.js';
+import { defaultOvulationDay } from './cycle-math.js';
 
-export function getHormoneLevels(cycleDay, ovulationDay, cycleLengthDays) {
+// SD (days) of the ovulation-day estimate. A calendar-only estimate is off by
+// ±2–3 days; body-sign markers narrow it. LH's surge lasts ~2 days, so with a
+// point estimate the snapshot would swing between baseline and peak on a
+// one-day error — we average over plausible ovulation days instead.
+const OVULATION_SD = { high: 1, medium: 1.5, low: 2.5 };
+
+export function ovulationSpreadDays(ovulationConfidence, breastfeeding) {
+  const sd = OVULATION_SD[ovulationConfidence] ?? OVULATION_SD.low;
+  return breastfeeding ? sd * 1.5 : sd;
+}
+
+// Expected levels over the ovulation-day uncertainty, plus a 10th–90th
+// percentile range per hormone. spreadDays = 0 gives the point estimate.
+export function getHormoneLevels(cycleDay, ovulationDay, cycleLengthDays, spreadDays = 0) {
   if (!cycleLengthDays) cycleLengthDays = 28;
-  if (!ovulationDay) ovulationDay = cycleLengthDays - 13;
+  if (!ovulationDay) ovulationDay = defaultOvulationDay(cycleLengthDays);
 
+  const scenarios = ovulationScenarios(ovulationDay, cycleLengthDays, spreadDays)
+    .map(s => ({ w: s.w, h: pointLevels(cycleDay, s.ovDay, cycleLengthDays) }));
+
+  const levels = { prolactin: null, range: {} };
+  for (const key of ['estrogen', 'progesterone', 'lh', 'fsh']) {
+    levels[key] = scenarios.reduce((sum, s) => sum + s.w * s.h[key], 0);
+    levels.range[key] = [weightedQuantile(scenarios, key, 0.1), weightedQuantile(scenarios, key, 0.9)];
+  }
+  return levels;
+}
+
+// Discretized normal over ovulation day. Kept 7 days from the start and 6
+// from the end so the phase curves below keep a valid shape.
+function ovulationScenarios(ovulationDay, cycleLengthDays, spreadDays) {
+  const lo = 7, hi = cycleLengthDays - 6;
+  if (!spreadDays || lo > hi) return [{ ovDay: ovulationDay, w: 1 }];
+
+  const reach = Math.ceil(spreadDays * 2.5);
+  const byDay = new Map();
+  for (let k = -reach; k <= reach; k++) {
+    const ovDay = Math.min(hi, Math.max(lo, ovulationDay + k));
+    const w = Math.exp(-(k * k) / (2 * spreadDays * spreadDays));
+    byDay.set(ovDay, (byDay.get(ovDay) || 0) + w);
+  }
+  const total = [...byDay.values()].reduce((a, b) => a + b, 0);
+  return [...byDay].map(([ovDay, w]) => ({ ovDay, w: w / total }));
+}
+
+function weightedQuantile(scenarios, key, q) {
+  const sorted = scenarios.map(s => ({ v: s.h[key], w: s.w })).sort((a, b) => a.v - b.v);
+  let cum = 0;
+  for (const s of sorted) {
+    cum += s.w;
+    if (cum >= q - 1e-9) return s.v;
+  }
+  return sorted[sorted.length - 1].v;
+}
+
+function pointLevels(cycleDay, ovulationDay, cycleLengthDays) {
   const daysFromOv = cycleDay - ovulationDay;
   const follicularLength = ovulationDay;
   const lutealLength = cycleLengthDays - ovulationDay;
@@ -15,8 +67,7 @@ export function getHormoneLevels(cycleDay, ovulationDay, cycleLengthDays) {
     estrogen: estrogen(cycleDay, ovulationDay, follicularLength, lutealLength, cycleLengthDays),
     progesterone: progesterone(daysFromOv, lutealLength),
     lh: lh(daysFromOv),
-    fsh: fsh(cycleDay, ovulationDay, follicularLength),
-    prolactin: null
+    fsh: fsh(cycleDay, ovulationDay, follicularLength)
   };
 }
 
@@ -65,13 +116,14 @@ function progesterone(dFromOv, lutLen) {
   return 0.45 + ((daysLeft - 3) / (lutLen - 12)) * 0.55;
 }
 
+// The surge starts ~24–36h before ovulation and peaks ~10–12h before it, so
+// the peak day is the day before ovulation, not ovulation day itself.
+const LH_SURGE = { '-2': 0.25, '-1': 1.0, '0': 0.75, '1': 0.25, '2': 0.12 };
+
 function lh(dFromOv) {
-  if (dFromOv < -2) return 0.1;
-  if (dFromOv < -1) return 0.1 + (dFromOv + 2) * 0.4;
-  if (dFromOv <= 0) return 0.5 + (dFromOv + 1) * 0.5;
-  if (dFromOv <= 1) return 1.0 - dFromOv * 0.7;
-  if (dFromOv <= 2) return 0.3 - (dFromOv - 1) * 0.2;
-  return 0.1;
+  const at = d => LH_SURGE[d] ?? 0.1;
+  const d0 = Math.floor(dFromOv);
+  return at(d0) + (at(d0 + 1) - at(d0)) * (dFromOv - d0);
 }
 
 function fsh(day, ovDay, follLen) {
@@ -97,25 +149,14 @@ export function prolactinFromNursing(sessionsPerDay) {
 }
 
 // Generate full curve data for a cycle (for charting)
-export function generateCycleCurve(cycleLengthDays, ovulationDay, nursingSessions) {
-  if (!ovulationDay) ovulationDay = cycleLengthDays - 13;
+export function generateCycleCurve(cycleLengthDays, ovulationDay, nursingSessions, spreadDays = 0) {
+  if (!ovulationDay) ovulationDay = defaultOvulationDay(cycleLengthDays);
   const points = [];
   for (let d = 1; d <= cycleLengthDays; d++) {
-    const h = getHormoneLevels(d, ovulationDay, cycleLengthDays);
+    const h = getHormoneLevels(d, ovulationDay, cycleLengthDays, spreadDays);
     h.prolactin = prolactinFromNursing(nursingSessions);
     h.day = d;
     points.push(h);
   }
   return points;
-}
-
-// Confidence band: returns multiplier for visual width
-export function confidenceBandWidth(ovulationConfidence, breastfeeding) {
-  let base;
-  switch (ovulationConfidence) {
-    case 'high': base = 0.08; break;
-    case 'medium': base = 0.15; break;
-    default: base = 0.25;
-  }
-  return breastfeeding ? base * 1.5 : base;
 }

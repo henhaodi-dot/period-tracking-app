@@ -82,6 +82,12 @@ export function estimateOvulation(cycle) {
   return ovDay;
 }
 
+// Cycle-day number (1-based) of ovulation when only the length is known.
+// Same anchor as the dates above: 13 days before the next period starts.
+export function defaultOvulationDay(cycleLengthDays) {
+  return cycleLengthDays - 12;
+}
+
 function estimateOvulationForActiveCycle(cycle, predictedLength) {
   if (!predictedLength) return null;
   const predictedEnd = addDays(cycle.startDate, predictedLength);

@@ -1,7 +1,7 @@
 import { t, getLanguage } from '../i18n.js';
 import * as db from '../db.js';
-import { generateCycleCurve, confidenceBandWidth } from '../hormone-model.js';
-import { daysBetween, addDays, today } from '../cycle-math.js';
+import { generateCycleCurve, ovulationSpreadDays } from '../hormone-model.js';
+import { daysBetween, addDays, today, defaultOvulationDay } from '../cycle-math.js';
 
 let selectedCycleId = null;
 
@@ -58,7 +58,7 @@ async function renderDetail(container, cycle) {
   const journalEntries = await db.getJournalEntriesForCycle(cycle.id);
 
   const lengthDays = cycle.lengthDays || (cycle.endDate ? daysBetween(cycle.startDate, cycle.endDate) : daysBetween(cycle.startDate, today()));
-  const ovDay = cycle.estimatedOvulation ? daysBetween(cycle.startDate, cycle.estimatedOvulation) + 1 : lengthDays - 13;
+  const ovDay = cycle.estimatedOvulation ? daysBetween(cycle.startDate, cycle.estimatedOvulation) + 1 : defaultOvulationDay(lengthDays);
 
   let chartSvg = '';
   if (cycle.endDate || lengthDays > 5) {
@@ -114,7 +114,7 @@ function renderHormoneChart(lengthDays, ovDay, confidence) {
   const plotW = W - pad.left - pad.right;
   const plotH = H - pad.top - pad.bottom;
 
-  const curve = generateCycleCurve(lengthDays, ovDay, null);
+  const curve = generateCycleCurve(lengthDays, ovDay, null, ovulationSpreadDays(confidence));
   const xScale = d => pad.left + ((d - 1) / (lengthDays - 1)) * plotW;
   const yScale = v => pad.top + (1 - v) * plotH;
 
