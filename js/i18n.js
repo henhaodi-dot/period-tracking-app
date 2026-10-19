@@ -206,6 +206,14 @@ const strings = {
   storageContents: { zh: '已存数据', en: 'Stored' },
   storageCounts: { zh: '{c} 个周期 · {l} 条日志 · {j} 篇日记', en: '{c} cycles · {l} logs · {j} journal entries' },
 
+  // History calendar
+  historyCalendar: { zh: '日历', en: 'Calendar' },
+  historyList: { zh: '列表', en: 'List' },
+  calPeriod: { zh: '经期', en: 'Period' },
+  calEstimated: { zh: '估计经期', en: 'Estimated' },
+  calPredicted: { zh: '预测经期', en: 'Predicted' },
+  calOvulation: { zh: '预计排卵', en: 'Est. ovulation' },
+
   // Editing past periods
   addPastPeriod: { zh: '补录过去的月经', en: 'Add a past period' },
   editPeriod: { zh: '编辑这次月经', en: 'Edit period' },
@@ -218,6 +226,9 @@ const strings = {
   periodEndShort: { zh: '结束', en: 'End' },
   periodLabel: { zh: '经期', en: 'Period' },
   periodDays: { zh: '经期 {n} 天', en: 'Period {n} days' },
+  periodRange: { zh: '经期 {start} – {end}（{n} 天）', en: 'Period {start} – {end} ({n} days)' },
+  currentCycle: { zh: '当前周期', en: 'Current cycle' },
+  periodStartTooSoon: { zh: '这次月经 {n} 天前才开始。确定今天是新的一次月经吗？如果是想记录月经结束，请取消，然后在"历史"里编辑这次月经。', en: 'This period started only {n} days ago. Is today really a new period? To record the end of this one instead, cancel and edit it in History.' },
   errStartRequired: { zh: '请选择开始日期', en: 'Choose a start date' },
   errFutureDate: { zh: '日期不能晚于今天', en: "Dates can't be in the future" },
   errDuplicateStart: { zh: '已经有一次月经从这天开始', en: 'Another period already starts on this day' },
@@ -246,6 +257,13 @@ export function setLanguage(lang) {
 
 export function getLanguage() {
   return currentLang;
+}
+
+// "10月9日" / "Oct 9"
+export function formatShortDate(dateStr) {
+  const [, m, d] = dateStr.split('-').map(Number);
+  if (currentLang === 'zh') return `${m}月${d}日`;
+  return new Date(dateStr + 'T00:00:00').toLocaleString('en', { month: 'short', day: 'numeric' });
 }
 
 export function t(key, vars) {

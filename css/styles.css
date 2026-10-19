@@ -15,6 +15,9 @@
   --accent-light: #e8f0e8;
   --danger: #c45c5c;
   --success: #5b7a5e;
+  --period: #c4776a;
+  --period-soft: #f4dfd9;
+  --ovulation: #b8963e;
 
   /* Seasonal — default to spring */
   --phase-bg: #f4f9f2;
@@ -222,6 +225,12 @@ nav button span {
   font-weight: 300;
   color: var(--phase-accent);
   line-height: 1.2;
+  margin-bottom: var(--space-sm);
+}
+
+.today-phase .period-range {
+  font-size: 0.85rem;
+  color: var(--period);
   margin-bottom: var(--space-sm);
 }
 
@@ -1037,11 +1046,104 @@ input[type="checkbox"] {
 .form-error {
   min-height: 1.2em;
   margin: var(--space-sm) 0;
-  font-size: 0.8rem;
-  color: #b5543c;
+  font-size: 0.85rem;
+  color: #a8442c;
+}
+.form-error:not(:empty) {
+  background: #fbe9e4;
+  border: 1px solid #f0c4b8;
+  border-radius: var(--radius-xs);
+  padding: var(--space-sm) var(--space-md);
+  font-weight: 600;
 }
 
 .settings-hint + .btn {
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+/* === History calendar === */
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-md);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-md);
+}
+
+.cal-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.cal-swatch {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+
+.cal-month {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.cal-month-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: var(--space-sm);
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.cal-weekday {
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  padding-bottom: 4px;
+}
+
+.cal-day {
+  position: relative;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid transparent;
+  border-radius: 50%;
+  background: none;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+}
+.cal-day:disabled { color: var(--text-muted); cursor: default; }
+
+.cal-day.is-recorded, .cal-swatch.is-recorded { background: var(--period); color: #fff; }
+.cal-day.is-estimated, .cal-swatch.is-estimated { background: var(--period-soft); color: var(--text); }
+.cal-day.is-predicted, .cal-swatch.is-predicted { border: 1.5px dashed var(--period); }
+.cal-day.is-today { box-shadow: 0 0 0 2px var(--text); }
+
+.cal-day.is-ovulation::after, .cal-swatch.is-ovulation::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--ovulation);
+}
+.cal-swatch.is-ovulation::after { bottom: 4px; }
