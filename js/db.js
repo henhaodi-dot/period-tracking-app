@@ -196,6 +196,36 @@ export async function saveCycleChain({ cycles, deletedIds = [], dayLogs = [], jo
   await txComplete(t);
 }
 
+// --- Storage durability ---
+// By default IndexedDB is "best effort": Chrome may evict it under storage
+// pressure. Chrome grants persistence silently (no prompt), normally for
+// installed PWAs. Needs a secure context (https or localhost).
+
+export async function requestPersistentStorage() {
+  if (!navigator.storage?.persist) return false;
+  if (await navigator.storage.persisted()) return true;
+  return navigator.storage.persist();
+}
+
+// persisted: true / false, or null when the browser can't persist here.
+export async function getStorageStatus() {
+  const storage = navigator.storage;
+  const [persisted, estimate, cycles, dayLogs, journal] = await Promise.all([
+    storage?.persisted ? storage.persisted() : null,
+    storage?.estimate ? storage.estimate() : null,
+    getAllCycles(), getAllDayLogs(), getAllJournalEntries()
+  ]);
+  return {
+    origin: location.origin,
+    installed: window.matchMedia('(display-mode: standalone)').matches,
+    persisted,
+    usageBytes: estimate?.usage ?? null,
+    cycles: cycles.length,
+    dayLogs: dayLogs.length,
+    journal: journal.length
+  };
+}
+
 // --- Export / Import ---
 
 export async function exportAll() {

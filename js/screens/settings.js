@@ -10,6 +10,8 @@ export async function render(container) {
   const lastBackup = settings.lastBackup || null;
 
   const needsBackup = !lastBackup || daysSince(lastBackup) >= 30;
+  const storage = await db.getStorageStatus();
+  const persistKey = storage.persisted === null ? 'storagePersistUnsupported' : storage.persisted ? 'storagePersistOn' : 'storagePersistOff';
 
   container.innerHTML = `
     <div class="screen">
@@ -68,6 +70,32 @@ export async function render(container) {
         <div class="settings-row">
           <button class="btn" id="import-json">${t('importData')}</button>
           <input type="file" id="import-file" accept=".json" style="display:none">
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-group-title">${t('storageTitle')}</div>
+        <div class="settings-row">
+          <span class="settings-label">${t('storageOrigin')}</span>
+          <span class="settings-value">${storage.origin}</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">${t('storageMode')}</span>
+          <span class="settings-value">${t(storage.installed ? 'storageInstalled' : 'storageBrowserTab')}</span>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">${t('storagePersist')}</span>
+          <span class="settings-value ${storage.persisted ? '' : 'warn'}">${t(persistKey)}</span>
+        </div>
+        ${storage.persisted === false ? `
+          <div class="settings-row">
+            <span class="settings-hint">${t('storagePersistHint')}</span>
+            <button class="btn" id="persist-retry">${t('storagePersistRetry')}</button>
+          </div>
+        ` : ''}
+        <div class="settings-row">
+          <span class="settings-label">${t('storageContents')}</span>
+          <span class="settings-value">${t('storageCounts', { c: storage.cycles, l: storage.dayLogs, j: storage.journal })}${storage.usageBytes !== null ? ` · ${formatBytes(storage.usageBytes)}` : ''}</span>
         </div>
       </div>
 
@@ -146,6 +174,18 @@ export async function render(container) {
   container.querySelector('#backup-now')?.addEventListener('click', () => {
     container.querySelector('#export-json')?.click();
   });
+
+  container.querySelector('#persist-retry')?.addEventListener('click', async () => {
+    const granted = await db.requestPersistentStorage().catch(() => false);
+    showToast(t(granted ? 'storagePersistOn' : 'storagePersistDenied'));
+    render(container);
+  });
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function downloadBlob(blob, filename) {

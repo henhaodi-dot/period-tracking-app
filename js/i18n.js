@@ -190,6 +190,22 @@ const strings = {
   periodEnded: { zh: '月经结束了？', en: 'Period ended?' },
   periodEndConfirm: { zh: '将今天标记为本次月经的最后一天', en: 'Mark today as the last day of this period' },
 
+  // Storage status
+  storageTitle: { zh: '数据存储', en: 'Data storage' },
+  storageOrigin: { zh: '网址', en: 'Address' },
+  storageMode: { zh: '运行方式', en: 'Running as' },
+  storageInstalled: { zh: '已安装的应用', en: 'Installed app' },
+  storageBrowserTab: { zh: '浏览器标签页', en: 'Browser tab' },
+  storagePersist: { zh: '持久存储', en: 'Persistent storage' },
+  storagePersistOn: { zh: '已获得', en: 'Granted' },
+  storagePersistOff: { zh: '未获得', en: 'Not granted' },
+  storagePersistUnsupported: { zh: '不支持（需要 https）', en: 'Unavailable (needs https)' },
+  storagePersistHint: { zh: '手机空间不足时，浏览器可能清理这些数据。安装到主屏幕后通常会自动获得。', en: 'The browser may clear this data when the phone runs low on space. Installing to the home screen usually grants it.' },
+  storagePersistRetry: { zh: '重新申请', en: 'Request again' },
+  storagePersistDenied: { zh: '浏览器暂未批准', en: 'Not granted by the browser yet' },
+  storageContents: { zh: '已存数据', en: 'Stored' },
+  storageCounts: { zh: '{c} 个周期 · {l} 条日志 · {j} 篇日记', en: '{c} cycles · {l} logs · {j} journal entries' },
+
   // Editing past periods
   addPastPeriod: { zh: '补录过去的月经', en: 'Add a past period' },
   editPeriod: { zh: '编辑这次月经', en: 'Edit period' },
