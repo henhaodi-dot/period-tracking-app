@@ -1,6 +1,7 @@
 import { t, bilingualPhase, getLanguage } from '../i18n.js';
 import * as db from '../db.js';
 import { showConfirmModal } from '../modal.js';
+import { periodRangeText } from './history.js';
 import { today, daysBetween, getPhase, predictNextPeriod, estimateOvulationActive, addDays, reanchorCycle, defaultOvulationDay, periodLengthDays } from '../cycle-math.js';
 import { getHormoneLevels, prolactinFromNursing, ovulationSpreadDays } from '../hormone-model.js';
 import { phaseInfo, getRemediesForPhase } from '../tcm.js';
@@ -54,6 +55,7 @@ export async function render(container) {
       <div class="today-phase">
         <div class="phase-label">${bilingualPhase(phase)}</div>
         <div class="cycle-day">${t('cycleDay', { n: cycleDay })}</div>
+        ${activeCycle.periodEnd ? `<div class="period-range">${periodRangeText(activeCycle)}</div>` : ''}
         <div class="felt-line">${t(feltKeys[phase])}</div>
       </div>
 
@@ -133,7 +135,10 @@ export async function render(container) {
   });
 
   container.querySelector('#start-period-btn')?.addEventListener('click', () => {
-    showConfirmModal(t('periodStarted'), t('periodStartConfirm'), () => startNewPeriod(cycles));
+    // A "new" period soon after the last one is usually a mis-tap for "period ended".
+    const sinceStart = daysBetween(activeCycle.startDate, todayStr);
+    const message = sinceStart < 15 ? t('periodStartTooSoon', { n: sinceStart }) : t('periodStartConfirm');
+    showConfirmModal(t('periodStarted'), message, () => startNewPeriod(cycles));
   });
   container.querySelector('#end-period-btn')?.addEventListener('click', () => endCurrentPeriod(activeCycle));
 }

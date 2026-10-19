@@ -228,6 +228,12 @@ nav button span {
   margin-bottom: var(--space-sm);
 }
 
+.today-phase .period-range {
+  font-size: 0.85rem;
+  color: var(--period);
+  margin-bottom: var(--space-sm);
+}
+
 .today-phase .felt-line {
   font-size: 0.85rem;
   color: var(--text-secondary);
@@ -1040,8 +1046,15 @@ input[type="checkbox"] {
 .form-error {
   min-height: 1.2em;
   margin: var(--space-sm) 0;
-  font-size: 0.8rem;
-  color: #b5543c;
+  font-size: 0.85rem;
+  color: #a8442c;
+}
+.form-error:not(:empty) {
+  background: #fbe9e4;
+  border: 1px solid #f0c4b8;
+  border-radius: var(--radius-xs);
+  padding: var(--space-sm) var(--space-md);
+  font-weight: 600;
 }
 
 .settings-hint + .btn {

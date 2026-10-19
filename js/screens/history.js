@@ -1,4 +1,4 @@
-import { t, getLanguage } from '../i18n.js';
+import { t, getLanguage, formatShortDate } from '../i18n.js';
 import * as db from '../db.js';
 import { generateCycleCurve, ovulationSpreadDays } from '../hormone-model.js';
 import { daysBetween, addDays, today, defaultOvulationDay, predictNextPeriod, validatePeriod, rebuildCycleChain, periodLengthDays, calendarMarks, fmt } from '../cycle-math.js';
@@ -85,10 +85,10 @@ function renderList(sorted) {
           if (c.anovulatorySuspected) tags.push(t('anovulatory'));
           return `
             <div class="cycle-item ${c.backfilled ? 'backfilled' : ''}" data-id="${c.id}">
-              <div class="cycle-dates">${c.startDate}${c.endDate ? ' → ' + c.endDate : ` (${lang === 'zh' ? '进行中' : 'active'})`}</div>
+              <div class="cycle-dates">${c.startDate}${c.endDate ? ' → ' + c.endDate : ` · ${t('currentCycle')}`}</div>
               <div class="cycle-meta">
                 ${c.lengthDays ? `<span>${c.lengthDays} ${t('days')}</span>` : ''}
-                ${c.periodEnd ? `<span>${t('periodDays', { n: periodLengthDays(c) })}</span>` : ''}
+                ${c.periodEnd ? `<span>${periodRangeText(c)}</span>` : ''}
                 ${tags.map(tg => `<span class="tag">${tg}</span>`).join('')}
               </div>
             </div>
@@ -187,7 +187,7 @@ async function renderDetail(container, cycle, cycles) {
         <span class="card-title">${cycle.startDate}${cycle.endDate ? ' → ' + cycle.endDate : ''}</span>
         <span class="card-subtitle">${lengthDays} ${t('days')}</span>
       </div>
-      <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">${t('periodLabel')}: ${cycle.startDate}${cycle.periodEnd ? ` → ${cycle.periodEnd} (${periodLengthDays(cycle)} ${t('days')})` : ''}</p>
+      <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">${cycle.periodEnd ? periodRangeText(cycle) : `${t('periodLabel')}: ${formatShortDate(cycle.startDate)} –`}</p>
       ${cycle.estimatedOvulation ? `<p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px">${lang === 'zh' ? '预计排卵' : 'Est. ovulation'}: ${cycle.estimatedOvulation}</p>` : ''}
       ${chartSvg ? `<div class="card"><div class="hormone-chart-wrap">${chartSvg}</div><div class="model-note">${t('modelNotMeasurement')}</div></div>` : ''}
       ${dayLogs.length > 0 ? `
@@ -276,7 +276,9 @@ function showPeriodForm(cycles, cycle, onSaved, prefillStart = '') {
     const periodEnd = overlay.querySelector('#pf-end').value || null;
     const err = validatePeriod(cycles, cycle?.id ?? null, startDate, periodEnd);
     if (err) {
-      overlay.querySelector('#pf-error').textContent = t(err.key, err.vars);
+      const box = overlay.querySelector('#pf-error');
+      box.textContent = t(err.key, err.vars);
+      box.scrollIntoView({ block: 'nearest' });
       return;
     }
     const edited = {
@@ -295,6 +297,10 @@ function showPeriodForm(cycles, cycle, onSaved, prefillStart = '') {
     close();
     onSaved(edited.id);
   });
+}
+
+export function periodRangeText(cycle) {
+  return t('periodRange', { start: formatShortDate(cycle.startDate), end: formatShortDate(cycle.periodEnd), n: periodLengthDays(cycle) });
 }
 
 async function commitCycles(nextCycles, deletedIds) {
