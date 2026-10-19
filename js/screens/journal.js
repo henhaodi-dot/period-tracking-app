@@ -17,9 +17,9 @@ export async function render(container) {
   let phase = 'follicular';
   if (activeCycle) {
     const cycleDay = daysBetween(activeCycle.startDate, todayStr) + 1;
-    const prediction = predictNextPeriod(cycles, breastfeeding);
-    const predictedLength = prediction ? prediction.predictedLength : 28;
-    const ovDayNum = defaultOvulationDay(predictedLength);
+    const prediction = predictNextPeriod(cycles, breastfeeding, await db.getDayLogsForCycle(activeCycle.id));
+    const predictedLength = prediction.predictedLength;
+    const ovDayNum = prediction.ovulationDay;
     phase = getPhase(cycleDay, ovDayNum, predictedLength, periodLengthDays(activeCycle));
   }
 
