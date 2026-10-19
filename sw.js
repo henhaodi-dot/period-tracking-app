@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'cycle-v6';
+const CACHE_VERSION = 'cycle-v7';
 const ASSETS = [
   './',
   './index.html',

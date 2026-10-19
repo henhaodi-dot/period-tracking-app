@@ -234,6 +234,46 @@ export function periodLengthDays(cycle) {
   return cycle?.periodEnd ? daysBetween(cycle.startDate, cycle.periodEnd) + 1 : null;
 }
 
+// Typical bleeding length from cycles with a recorded end; 5 if none.
+export function typicalPeriodLength(cycles) {
+  const lengths = cycles.map(periodLengthDays).filter(Boolean);
+  if (lengths.length === 0) return 5;
+  return Math.round(lengths.reduce((a, b) => a + b, 0) / lengths.length);
+}
+
+// --- Calendar marks ---
+// date -> { period: 'recorded' | 'estimated' | 'predicted', cycleId, ovulation }
+// A period without a recorded end shows its start as recorded and the
+// following days, up to the typical length, as estimated.
+export function calendarMarks(cycles, prediction, todayStr = today()) {
+  const marks = new Map();
+  const mark = (date, patch) => marks.set(date, { ...marks.get(date), ...patch });
+  const typical = typicalPeriodLength(cycles);
+  const sorted = [...cycles].sort((a, b) => a.startDate.localeCompare(b.startDate));
+
+  sorted.forEach((c, i) => {
+    const next = sorted[i + 1]?.startDate;
+    const len = c.periodEnd ? periodLengthDays(c) : typical;
+    for (let d = 0; d < len; d++) {
+      const date = addDays(c.startDate, d);
+      if (next && date >= next) break;
+      mark(date, { period: c.periodEnd || d === 0 ? 'recorded' : 'estimated', cycleId: c.id });
+    }
+    const ov = c.endDate
+      ? c.estimatedOvulation
+      : prediction && estimateOvulationActive(c, prediction.predictedLength);
+    if (ov) mark(ov, { ovulation: true });
+  });
+
+  if (prediction && prediction.expectedDate > todayStr) {
+    for (let d = 0; d < typical; d++) {
+      const date = addDays(prediction.expectedDate, d);
+      if (!marks.get(date)?.period) mark(date, { period: 'predicted' });
+    }
+  }
+  return marks;
+}
+
 // --- Phase calculation ---
 
 // periodDays: recorded period length, if known; otherwise assume 5.

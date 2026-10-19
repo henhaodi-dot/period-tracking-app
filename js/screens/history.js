@@ -1,7 +1,7 @@
 import { t, getLanguage } from '../i18n.js';
 import * as db from '../db.js';
 import { generateCycleCurve, ovulationSpreadDays } from '../hormone-model.js';
-import { daysBetween, addDays, today, defaultOvulationDay, predictNextPeriod, validatePeriod, rebuildCycleChain, periodLengthDays } from '../cycle-math.js';
+import { daysBetween, addDays, today, defaultOvulationDay, predictNextPeriod, validatePeriod, rebuildCycleChain, periodLengthDays, calendarMarks, fmt } from '../cycle-math.js';
 import { showConfirmModal } from '../modal.js';
 
 let selectedCycleId = null;
@@ -20,12 +20,63 @@ export async function render(container) {
     selectedCycleId = null;
   }
 
+  const view = (await db.getSetting('historyView')) || 'calendar';
+  let body;
+  if (view === 'calendar') {
+    const breastfeeding = !!(await db.getSetting('breastfeeding'));
+    body = renderCalendar(cycles, predictNextPeriod(cycles, breastfeeding));
+  } else {
+    body = renderList(sorted);
+  }
+
   container.innerHTML = `
     <div class="screen">
       <div class="card-header">
         <span class="card-title">${t('historyTitle')}</span>
+        <div class="pill-group">
+          <button class="pill ${view === 'calendar' ? 'selected' : ''}" data-view="calendar">${t('historyCalendar')}</button>
+          <button class="pill ${view === 'list' ? 'selected' : ''}" data-view="list">${t('historyList')}</button>
+        </div>
       </div>
       <button class="add-date-btn" id="add-past-period">+ ${t('addPastPeriod')}</button>
+      ${body}
+    </div>
+  `;
+
+  container.querySelectorAll('[data-view]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await db.setSetting('historyView', btn.dataset.view);
+      render(container);
+    });
+  });
+
+  container.querySelector('#add-past-period').addEventListener('click', () => {
+    showPeriodForm(cycles, null, () => render(container));
+  });
+
+  container.querySelectorAll('.cycle-item').forEach(el => {
+    el.addEventListener('click', () => {
+      selectedCycleId = el.dataset.id;
+      render(container);
+    });
+  });
+
+  // Period day -> that cycle's detail; any other past day -> add a period starting there.
+  container.querySelector('.calendar')?.addEventListener('click', e => {
+    const cell = e.target.closest('.cal-day');
+    if (!cell || cell.disabled) return;
+    if (cell.dataset.cycle) {
+      selectedCycleId = cell.dataset.cycle;
+      render(container);
+    } else {
+      showPeriodForm(cycles, null, () => render(container), cell.dataset.date);
+    }
+  });
+}
+
+function renderList(sorted) {
+  const lang = getLanguage();
+  return `
       <div class="cycle-list">
         ${sorted.length === 0 ? `<div class="empty-state"><p>${lang === 'zh' ? '暂无记录' : 'No cycles recorded yet'}</p></div>` : ''}
         ${sorted.map(c => {
@@ -44,22 +95,67 @@ export async function render(container) {
           `;
         }).join('')}
       </div>
+  `;
+}
+
+// Months newest first: from the month of the predicted period (or this month)
+// back to the earliest recorded cycle, at least two months back.
+function renderCalendar(cycles, prediction) {
+  const lang = getLanguage();
+  const todayStr = today();
+  const marks = calendarMarks(cycles, prediction, todayStr);
+
+  const lastMarked = [...marks.keys()].reduce((a, b) => (b > a ? b : a), todayStr);
+  const earliest = cycles.reduce((a, c) => (c.startDate < a ? c.startDate : a), addDays(todayStr.slice(0, 8) + '01', -40));
+  const months = [];
+  for (let d = new Date(lastMarked.slice(0, 8) + '01T00:00:00'); fmt(d).slice(0, 7) >= earliest.slice(0, 7); d.setMonth(d.getMonth() - 1)) {
+    months.push(new Date(d));
+  }
+
+  const weekdays = lang === 'zh' ? ['一', '二', '三', '四', '五', '六', '日'] : ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const legend = [
+    ['is-recorded', t('calPeriod')],
+    ['is-estimated', t('calEstimated')],
+    ['is-predicted', t('calPredicted')],
+    ['is-ovulation', t('calOvulation')]
+  ];
+
+  return `
+    <div class="cal-legend">
+      ${legend.map(([cls, label]) => `<span class="cal-legend-item"><span class="cal-swatch ${cls}"></span>${label}</span>`).join('')}
+    </div>
+    <div class="calendar">
+      ${months.map(first => {
+        const y = first.getFullYear();
+        const m = first.getMonth();
+        const title = lang === 'zh' ? `${y}年${m + 1}月` : first.toLocaleString('en', { month: 'long', year: 'numeric' });
+        const lead = (first.getDay() + 6) % 7; // Monday-first
+        const daysInMonth = new Date(y, m + 1, 0).getDate();
+        const cells = [];
+        for (let i = 0; i < lead; i++) cells.push('<span></span>');
+        for (let day = 1; day <= daysInMonth; day++) {
+          const date = fmt(new Date(y, m, day));
+          const mk = marks.get(date) || {};
+          const cls = ['cal-day'];
+          if (mk.period) cls.push(`is-${mk.period}`);
+          if (mk.ovulation) cls.push('is-ovulation');
+          if (date === todayStr) cls.push('is-today');
+          const cycleId = mk.period && mk.period !== 'predicted' ? mk.cycleId : '';
+          const disabled = !cycleId && date > todayStr;
+          cells.push(`<button class="${cls.join(' ')}" data-date="${date}"${cycleId ? ` data-cycle="${cycleId}"` : ''}${disabled ? ' disabled' : ''}>${day}</button>`);
+        }
+        return `
+          <section class="cal-month">
+            <h3 class="cal-month-title">${title}</h3>
+            <div class="cal-grid">
+              ${weekdays.map(w => `<span class="cal-weekday">${w}</span>`).join('')}
+              ${cells.join('')}
+            </div>
+          </section>
+        `;
+      }).join('')}
     </div>
   `;
-
-  container.querySelector('#add-past-period').addEventListener('click', () => {
-    showPeriodForm(cycles, null, id => {
-      selectedCycleId = id;
-      render(container);
-    });
-  });
-
-  container.querySelectorAll('.cycle-item').forEach(el => {
-    el.addEventListener('click', () => {
-      selectedCycleId = el.dataset.id;
-      render(container);
-    });
-  });
 }
 
 async function renderDetail(container, cycle, cycles) {
@@ -147,14 +243,14 @@ async function renderDetail(container, cycle, cycles) {
 }
 
 // Add (cycle = null) or edit a period's start/end, then rebuild the chain.
-function showPeriodForm(cycles, cycle, onSaved) {
+function showPeriodForm(cycles, cycle, onSaved, prefillStart = '') {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal">
       <h2>${t(cycle ? 'editPeriod' : 'addPastPeriod')}</h2>
       <label class="form-field">${t('periodStartDate')}
-        <input type="date" id="pf-start" value="${cycle?.startDate || ''}" max="${today()}">
+        <input type="date" id="pf-start" value="${cycle?.startDate || prefillStart}" max="${today()}">
       </label>
       <label class="form-field">${t('periodEndDate')}
         <input type="date" id="pf-end" value="${cycle?.periodEnd || ''}" max="${today()}">

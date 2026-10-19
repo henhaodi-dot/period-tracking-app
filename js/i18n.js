@@ -206,6 +206,14 @@ const strings = {
   storageContents: { zh: '已存数据', en: 'Stored' },
   storageCounts: { zh: '{c} 个周期 · {l} 条日志 · {j} 篇日记', en: '{c} cycles · {l} logs · {j} journal entries' },
 
+  // History calendar
+  historyCalendar: { zh: '日历', en: 'Calendar' },
+  historyList: { zh: '列表', en: 'List' },
+  calPeriod: { zh: '经期', en: 'Period' },
+  calEstimated: { zh: '估计经期', en: 'Estimated' },
+  calPredicted: { zh: '预测经期', en: 'Predicted' },
+  calOvulation: { zh: '预计排卵', en: 'Est. ovulation' },
+
   // Editing past periods
   addPastPeriod: { zh: '补录过去的月经', en: 'Add a past period' },
   editPeriod: { zh: '编辑这次月经', en: 'Edit period' },
