@@ -185,6 +185,47 @@ export async function getSettings() {
   return out;
 }
 
+// Writes a rebuilt cycle chain and the day logs / journal entries it re-linked
+// in one transaction, so an interrupted edit can't leave the chain half-updated.
+export async function saveCycleChain({ cycles, deletedIds = [], dayLogs = [], journal = [] }) {
+  const { tx: t, store: [cs, dl, j] } = await tx(['cycles', 'dayLogs', 'journal'], 'readwrite');
+  for (const id of deletedIds) cs.delete(id);
+  for (const c of cycles) cs.put(c);
+  for (const d of dayLogs) dl.put(d);
+  for (const e of journal) j.put(e);
+  await txComplete(t);
+}
+
+// --- Storage durability ---
+// By default IndexedDB is "best effort": Chrome may evict it under storage
+// pressure. Chrome grants persistence silently (no prompt), normally for
+// installed PWAs. Needs a secure context (https or localhost).
+
+export async function requestPersistentStorage() {
+  if (!navigator.storage?.persist) return false;
+  if (await navigator.storage.persisted()) return true;
+  return navigator.storage.persist();
+}
+
+// persisted: true / false, or null when the browser can't persist here.
+export async function getStorageStatus() {
+  const storage = navigator.storage;
+  const [persisted, estimate, cycles, dayLogs, journal] = await Promise.all([
+    storage?.persisted ? storage.persisted() : null,
+    storage?.estimate ? storage.estimate() : null,
+    getAllCycles(), getAllDayLogs(), getAllJournalEntries()
+  ]);
+  return {
+    origin: location.origin,
+    installed: window.matchMedia('(display-mode: standalone)').matches,
+    persisted,
+    usageBytes: estimate?.usage ?? null,
+    cycles: cycles.length,
+    dayLogs: dayLogs.length,
+    journal: journal.length
+  };
+}
+
 // --- Export / Import ---
 
 export async function exportAll() {

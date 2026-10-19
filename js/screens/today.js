@@ -1,7 +1,8 @@
 import { t, bilingualPhase, getLanguage } from '../i18n.js';
 import * as db from '../db.js';
-import { today, daysBetween, getPhase, predictNextPeriod, estimateOvulationActive, addDays, reanchorCycle } from '../cycle-math.js';
-import { getHormoneLevels, prolactinFromNursing, confidenceBandWidth } from '../hormone-model.js';
+import { showConfirmModal } from '../modal.js';
+import { today, daysBetween, getPhase, predictNextPeriod, estimateOvulationActive, addDays, reanchorCycle, defaultOvulationDay, periodLengthDays } from '../cycle-math.js';
+import { getHormoneLevels, prolactinFromNursing, ovulationSpreadDays } from '../hormone-model.js';
 import { phaseInfo, getRemediesForPhase } from '../tcm.js';
 
 export async function render(container) {
@@ -31,14 +32,14 @@ export async function render(container) {
   const prediction = predictNextPeriod(cycles, breastfeeding);
   const predictedLength = prediction ? prediction.predictedLength : 28;
   const ovDay = estimateOvulationActive(activeCycle, predictedLength);
-  const ovDayNum = ovDay ? daysBetween(activeCycle.startDate, ovDay) + 1 : predictedLength - 13;
-  const phase = getPhase(cycleDay, ovDayNum, predictedLength);
-  const hormones = getHormoneLevels(cycleDay, ovDayNum, predictedLength);
+  const ovDayNum = ovDay ? daysBetween(activeCycle.startDate, ovDay) + 1 : defaultOvulationDay(predictedLength);
+  const phase = getPhase(cycleDay, ovDayNum, predictedLength, periodLengthDays(activeCycle));
+  // The active-cycle estimate is calendar-only (no marker nudge), so 'low'.
+  const hormones = getHormoneLevels(cycleDay, ovDayNum, predictedLength, ovulationSpreadDays('low', breastfeeding));
 
   const todayLog = await db.getDayLog(todayStr);
   const nursing = todayLog?.context?.nursingSessions;
   const prolactin = breastfeeding ? prolactinFromNursing(nursing ?? 6) : null;
-  const confWidth = confidenceBandWidth('low', breastfeeding);
 
   document.documentElement.dataset.phase = phase;
 
@@ -63,11 +64,11 @@ export async function render(container) {
           <span class="card-title">${t('hormoneSnapshot')}</span>
         </div>
         <div class="hormone-bars">
-          ${hormoneBar(t('estrogen'), hormones.estrogen, 'estrogen', confWidth)}
-          ${hormoneBar(t('progesterone'), hormones.progesterone, 'progesterone', confWidth)}
-          ${hormoneBar(t('lhLabel'), hormones.lh, 'lh', confWidth)}
-          ${hormoneBar(t('fshLabel'), hormones.fsh, 'fsh', confWidth)}
-          ${prolactin !== null ? hormoneBar(t('prolactinLabel'), prolactin, 'prolactin', 0) : ''}
+          ${hormoneBar(t('estrogen'), hormones.estrogen, 'estrogen', hormones.range.estrogen)}
+          ${hormoneBar(t('progesterone'), hormones.progesterone, 'progesterone', hormones.range.progesterone)}
+          ${hormoneBar(t('lhLabel'), hormones.lh, 'lh', hormones.range.lh)}
+          ${hormoneBar(t('fshLabel'), hormones.fsh, 'fsh', hormones.range.fsh)}
+          ${prolactin !== null ? hormoneBar(t('prolactinLabel'), prolactin, 'prolactin', null) : ''}
         </div>
         <div class="model-note">${t('modelNotMeasurement')}</div>
       </div>
@@ -137,23 +138,24 @@ export async function render(container) {
   container.querySelector('#end-period-btn')?.addEventListener('click', () => endCurrentPeriod(activeCycle));
 }
 
-function hormoneBar(label, value, cls, confWidth) {
+// range: [lo, hi] spread of plausible levels given ovulation-day uncertainty
+function hormoneBar(label, value, cls, range) {
   const pct = Math.round(value * 100);
-  const confStart = Math.max(0, pct - confWidth * 100);
-  const confEnd = Math.min(100, pct + confWidth * 100);
+  const confStart = range ? Math.round(range[0] * 100) : 0;
+  const confEnd = range ? Math.round(range[1] * 100) : 0;
   return `
     <div class="hormone-row">
       <span class="hormone-label">${label}</span>
       <div class="hormone-bar-track">
         <div class="hormone-bar-fill ${cls}" style="width:${pct}%"></div>
-        ${confWidth > 0 ? `<div class="hormone-confidence" style="left:${confStart}%;width:${confEnd - confStart}%"></div>` : ''}
+        ${confEnd > confStart ? `<div class="hormone-confidence" style="left:${confStart}%;width:${confEnd - confStart}%"></div>` : ''}
       </div>
     </div>
   `;
 }
 
 function renderPeriodActions(activeCycle, cycleDay) {
-  if (cycleDay <= 8) {
+  if (cycleDay <= 8 && !activeCycle.periodEnd) {
     return `
       <div class="period-actions">
         <button class="period-btn" id="end-period-btn">${t('logPeriodEnd')}</button>
@@ -197,28 +199,9 @@ async function startNewPeriod(cycles) {
   window.dispatchEvent(new HashChangeEvent('hashchange'));
 }
 
-async function endCurrentPeriod(activeCycle) {
-  location.hash = '#log';
-}
-
-function showConfirmModal(title, message, onConfirm) {
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `
-    <div class="modal">
-      <h2>${title}</h2>
-      <p style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:16px">${message}</p>
-      <div class="btn-row">
-        <button class="btn" id="modal-cancel">${t('cancel')}</button>
-        <button class="btn btn-primary" id="modal-confirm">${t('confirm')}</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  overlay.querySelector('#modal-cancel').addEventListener('click', () => overlay.remove());
-  overlay.querySelector('#modal-confirm').addEventListener('click', () => {
-    overlay.remove();
-    onConfirm();
+function endCurrentPeriod(activeCycle) {
+  showConfirmModal(t('periodEnded'), t('periodEndConfirm'), async () => {
+    await db.saveCycle({ ...activeCycle, periodEnd: today() });
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
   });
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 }

@@ -82,6 +82,12 @@ export function estimateOvulation(cycle) {
   return ovDay;
 }
 
+// Cycle-day number (1-based) of ovulation when only the length is known.
+// Same anchor as the dates above: 13 days before the next period starts.
+export function defaultOvulationDay(cycleLengthDays) {
+  return cycleLengthDays - 12;
+}
+
 function estimateOvulationForActiveCycle(cycle, predictedLength) {
   if (!predictedLength) return null;
   const predictedEnd = addDays(cycle.startDate, predictedLength);
@@ -164,10 +170,75 @@ export function reanchorCycle(cycle, dayLogs) {
   };
 }
 
+// --- Editing past periods ---
+// A cycle runs from one period start to the next, so adding, moving or
+// deleting a start changes its neighbours too: end dates, lengths, ovulation
+// estimates, and which cycle each day log / journal entry belongs to.
+
+// Returns { key, vars } for the first problem, or null. `cycles` excludes
+// nothing; selfId is the cycle being edited (null when adding).
+export function validatePeriod(cycles, selfId, startDate, periodEnd) {
+  const todayStr = today();
+  if (!startDate) return { key: 'errStartRequired' };
+  if (startDate > todayStr || (periodEnd && periodEnd > todayStr)) return { key: 'errFutureDate' };
+  const others = cycles.filter(c => c.id !== selfId);
+  if (others.some(c => c.startDate === startDate)) return { key: 'errDuplicateStart' };
+  const prev = others.filter(c => c.startDate < startDate).sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
+  if (prev?.periodEnd && prev.periodEnd >= startDate) {
+    return { key: 'errInsidePrevPeriod', vars: { start: prev.startDate, end: prev.periodEnd } };
+  }
+  if (periodEnd) {
+    if (periodEnd < startDate) return { key: 'errEndBeforeStart' };
+    const next = others.filter(c => c.startDate > startDate).sort((a, b) => a.startDate.localeCompare(b.startDate))[0];
+    if (next && periodEnd >= next.startDate) return { key: 'errEndAfterNext', vars: { date: next.startDate } };
+  }
+  return null;
+}
+
+// Recomputes the whole chain. Returns the rebuilt cycles plus only the day
+// logs and journal entries whose cycle link changed.
+export function rebuildCycleChain(cycles, dayLogs, journal) {
+  const sorted = [...cycles]
+    .sort((a, b) => a.startDate.localeCompare(b.startDate))
+    .map((c, i, arr) => {
+      const endDate = arr[i + 1]?.startDate ?? null;
+      return { ...c, endDate, lengthDays: endDate ? daysBetween(c.startDate, endDate) : null, estimatedOvulation: null };
+    });
+  const cycleFor = date => [...sorted].reverse().find(c => c.startDate <= date) || null;
+
+  const changedLogs = [];
+  const logsByCycle = new Map();
+  for (const log of dayLogs) {
+    const c = cycleFor(log.date);
+    const cycleId = c ? c.id : null;
+    const cycleDay = c ? daysBetween(c.startDate, log.date) + 1 : null;
+    if (log.cycleId !== cycleId || log.cycleDay !== cycleDay) changedLogs.push({ ...log, cycleId, cycleDay });
+    if (cycleId) logsByCycle.set(cycleId, [...(logsByCycle.get(cycleId) || []), log]);
+  }
+
+  const changedJournal = [];
+  for (const entry of journal) {
+    const cycleId = cycleFor(entry.date)?.id ?? null;
+    if (entry.cycleId !== cycleId) changedJournal.push({ ...entry, cycleId });
+  }
+
+  const rebuilt = sorted.map(c => c.endDate
+    ? reanchorCycle(c, logsByCycle.get(c.id) || [])
+    : { ...c, anovulatorySuspected: false, ovulationConfidence: 'low' });
+
+  return { cycles: rebuilt, dayLogs: changedLogs, journal: changedJournal };
+}
+
+// Days of bleeding (inclusive) when the period's end has been recorded.
+export function periodLengthDays(cycle) {
+  return cycle?.periodEnd ? daysBetween(cycle.startDate, cycle.periodEnd) + 1 : null;
+}
+
 // --- Phase calculation ---
 
-export function getPhase(cycleDay, ovulationDay, cycleLengthDays) {
-  if (cycleDay <= 5) return 'menstrual';
+// periodDays: recorded period length, if known; otherwise assume 5.
+export function getPhase(cycleDay, ovulationDay, cycleLengthDays, periodDays = null) {
+  if (cycleDay <= (periodDays || 5)) return 'menstrual';
   if (!ovulationDay) {
     if (cycleDay <= 14) return 'follicular';
     if (cycleDay <= 16) return 'ovulatory';

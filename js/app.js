@@ -32,6 +32,8 @@ let currentScreen = 'today';
 let routeVersion = 0;
 
 async function init() {
+  db.requestPersistentStorage().catch(() => {});
+
   const savedLang = await db.getSetting('language');
   if (savedLang) setLanguage(savedLang);
 

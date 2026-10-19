@@ -1,7 +1,8 @@
 import { t, getLanguage } from '../i18n.js';
 import * as db from '../db.js';
-import { generateCycleCurve, confidenceBandWidth } from '../hormone-model.js';
-import { daysBetween, addDays, today } from '../cycle-math.js';
+import { generateCycleCurve, ovulationSpreadDays } from '../hormone-model.js';
+import { daysBetween, addDays, today, defaultOvulationDay, predictNextPeriod, validatePeriod, rebuildCycleChain, periodLengthDays } from '../cycle-math.js';
+import { showConfirmModal } from '../modal.js';
 
 let selectedCycleId = null;
 
@@ -13,7 +14,7 @@ export async function render(container) {
   if (selectedCycleId) {
     const cycle = sorted.find(c => c.id === selectedCycleId);
     if (cycle) {
-      await renderDetail(container, cycle);
+      await renderDetail(container, cycle, cycles);
       return;
     }
     selectedCycleId = null;
@@ -24,6 +25,7 @@ export async function render(container) {
       <div class="card-header">
         <span class="card-title">${t('historyTitle')}</span>
       </div>
+      <button class="add-date-btn" id="add-past-period">+ ${t('addPastPeriod')}</button>
       <div class="cycle-list">
         ${sorted.length === 0 ? `<div class="empty-state"><p>${lang === 'zh' ? '暂无记录' : 'No cycles recorded yet'}</p></div>` : ''}
         ${sorted.map(c => {
@@ -35,6 +37,7 @@ export async function render(container) {
               <div class="cycle-dates">${c.startDate}${c.endDate ? ' → ' + c.endDate : ` (${lang === 'zh' ? '进行中' : 'active'})`}</div>
               <div class="cycle-meta">
                 ${c.lengthDays ? `<span>${c.lengthDays} ${t('days')}</span>` : ''}
+                ${c.periodEnd ? `<span>${t('periodDays', { n: periodLengthDays(c) })}</span>` : ''}
                 ${tags.map(tg => `<span class="tag">${tg}</span>`).join('')}
               </div>
             </div>
@@ -44,6 +47,13 @@ export async function render(container) {
     </div>
   `;
 
+  container.querySelector('#add-past-period').addEventListener('click', () => {
+    showPeriodForm(cycles, null, id => {
+      selectedCycleId = id;
+      render(container);
+    });
+  });
+
   container.querySelectorAll('.cycle-item').forEach(el => {
     el.addEventListener('click', () => {
       selectedCycleId = el.dataset.id;
@@ -52,17 +62,26 @@ export async function render(container) {
   });
 }
 
-async function renderDetail(container, cycle) {
+async function renderDetail(container, cycle, cycles) {
   const lang = getLanguage();
   const dayLogs = await db.getDayLogsForCycle(cycle.id);
   const journalEntries = await db.getJournalEntriesForCycle(cycle.id);
 
   const lengthDays = cycle.lengthDays || (cycle.endDate ? daysBetween(cycle.startDate, cycle.endDate) : daysBetween(cycle.startDate, today()));
-  const ovDay = cycle.estimatedOvulation ? daysBetween(cycle.startDate, cycle.estimatedOvulation) + 1 : lengthDays - 13;
 
   let chartSvg = '';
-  if (cycle.endDate || lengthDays > 5) {
-    chartSvg = renderHormoneChart(lengthDays, ovDay, cycle.ovulationConfidence || 'low');
+  if (cycle.endDate) {
+    const ovDay = cycle.estimatedOvulation ? daysBetween(cycle.startDate, cycle.estimatedOvulation) + 1 : defaultOvulationDay(lengthDays);
+    chartSvg = renderHormoneChart(lengthDays, ovDay, ovulationSpreadDays(cycle.ovulationConfidence || 'low'));
+  } else {
+    // Active cycle: elapsed days aren't the cycle length. Chart the predicted
+    // cycle with the same ovulation anchor and spread as Today, and mark today.
+    const breastfeeding = !!(await db.getSetting('breastfeeding'));
+    const prediction = predictNextPeriod(cycles, breastfeeding);
+    const predictedLength = prediction ? prediction.predictedLength : 28;
+    const cycleDay = lengthDays + 1;
+    chartSvg = renderHormoneChart(Math.max(predictedLength, cycleDay), defaultOvulationDay(predictedLength),
+      ovulationSpreadDays('low', breastfeeding), cycleDay);
   }
 
   container.innerHTML = `
@@ -72,6 +91,7 @@ async function renderDetail(container, cycle) {
         <span class="card-title">${cycle.startDate}${cycle.endDate ? ' → ' + cycle.endDate : ''}</span>
         <span class="card-subtitle">${lengthDays} ${t('days')}</span>
       </div>
+      <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px">${t('periodLabel')}: ${cycle.startDate}${cycle.periodEnd ? ` → ${cycle.periodEnd} (${periodLengthDays(cycle)} ${t('days')})` : ''}</p>
       ${cycle.estimatedOvulation ? `<p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px">${lang === 'zh' ? '预计排卵' : 'Est. ovulation'}: ${cycle.estimatedOvulation}</p>` : ''}
       ${chartSvg ? `<div class="card"><div class="hormone-chart-wrap">${chartSvg}</div><div class="model-note">${t('modelNotMeasurement')}</div></div>` : ''}
       ${dayLogs.length > 0 ? `
@@ -87,6 +107,10 @@ async function renderDetail(container, cycle) {
           `).join('')}
         </div>
       ` : ''}
+      <div class="btn-row mb-md">
+        <button class="btn" id="edit-period">${t('edit')}</button>
+        <button class="btn" id="delete-period">${t('remove')}</button>
+      </div>
       ${journalEntries.length > 0 ? `
         <div class="card">
           <div class="card-title mb-md">${t('journalTitle')}</div>
@@ -105,16 +129,92 @@ async function renderDetail(container, cycle) {
     selectedCycleId = null;
     render(container);
   });
+
+  container.querySelector('#edit-period').addEventListener('click', () => {
+    showPeriodForm(cycles, cycle, id => {
+      selectedCycleId = id;
+      render(container);
+    });
+  });
+
+  container.querySelector('#delete-period').addEventListener('click', () => {
+    showConfirmModal(t('deletePeriod'), t('deletePeriodConfirm'), async () => {
+      await commitCycles(cycles.filter(c => c.id !== cycle.id), [cycle.id]);
+      selectedCycleId = null;
+      render(container);
+    });
+  });
 }
 
-function renderHormoneChart(lengthDays, ovDay, confidence) {
+// Add (cycle = null) or edit a period's start/end, then rebuild the chain.
+function showPeriodForm(cycles, cycle, onSaved) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h2>${t(cycle ? 'editPeriod' : 'addPastPeriod')}</h2>
+      <label class="form-field">${t('periodStartDate')}
+        <input type="date" id="pf-start" value="${cycle?.startDate || ''}" max="${today()}">
+      </label>
+      <label class="form-field">${t('periodEndDate')}
+        <input type="date" id="pf-end" value="${cycle?.periodEnd || ''}" max="${today()}">
+      </label>
+      <label class="form-check">
+        <input type="checkbox" id="pf-approx" ${cycle?.dateApproximate ? 'checked' : ''}>
+        ${t('onboardingApproximate')}
+      </label>
+      <p class="form-error" id="pf-error"></p>
+      <div class="btn-row">
+        <button class="btn" id="pf-cancel">${t('cancel')}</button>
+        <button class="btn btn-primary" id="pf-save">${t('save')}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#pf-cancel').addEventListener('click', close);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+  overlay.querySelector('#pf-save').addEventListener('click', async () => {
+    const startDate = overlay.querySelector('#pf-start').value;
+    const periodEnd = overlay.querySelector('#pf-end').value || null;
+    const err = validatePeriod(cycles, cycle?.id ?? null, startDate, periodEnd);
+    if (err) {
+      overlay.querySelector('#pf-error').textContent = t(err.key, err.vars);
+      return;
+    }
+    const edited = {
+      ...(cycle || {
+        id: crypto.randomUUID(),
+        ovulationConfidence: 'low',
+        anovulatorySuspected: false,
+        backfilled: true,
+        excludeFromStats: false
+      }),
+      startDate,
+      periodEnd,
+      dateApproximate: overlay.querySelector('#pf-approx').checked
+    };
+    await commitCycles(cycles.filter(c => c.id !== edited.id).concat(edited), []);
+    close();
+    onSaved(edited.id);
+  });
+}
+
+async function commitCycles(nextCycles, deletedIds) {
+  const [dayLogs, journal] = await Promise.all([db.getAllDayLogs(), db.getAllJournalEntries()]);
+  const rebuilt = rebuildCycleChain(nextCycles, dayLogs, journal);
+  await db.saveCycleChain({ ...rebuilt, deletedIds });
+}
+
+function renderHormoneChart(lengthDays, ovDay, spreadDays, todayDay = null) {
   const W = Math.max(320, lengthDays * 14);
   const H = 160;
   const pad = { top: 20, right: 10, bottom: 30, left: 10 };
   const plotW = W - pad.left - pad.right;
   const plotH = H - pad.top - pad.bottom;
 
-  const curve = generateCycleCurve(lengthDays, ovDay, null);
+  const curve = generateCycleCurve(lengthDays, ovDay, null, spreadDays);
   const xScale = d => pad.left + ((d - 1) / (lengthDays - 1)) * plotW;
   const yScale = v => pad.top + (1 - v) * plotH;
 
@@ -133,7 +233,12 @@ function renderHormoneChart(lengthDays, ovDay, confidence) {
 
   // Ovulation marker
   const ovX = xScale(ovDay);
-  const ovLine = `<line x1="${ovX}" y1="${pad.top}" x2="${ovX}" y2="${pad.top + plotH}" stroke="var(--text-muted)" stroke-width="0.5" stroke-dasharray="3,3"/>`;
+  let ovLine = `<line x1="${ovX}" y1="${pad.top}" x2="${ovX}" y2="${pad.top + plotH}" stroke="var(--text-muted)" stroke-width="0.5" stroke-dasharray="3,3"/>`;
+  if (todayDay) {
+    const tx = xScale(todayDay);
+    ovLine += `<line x1="${tx}" y1="${pad.top}" x2="${tx}" y2="${pad.top + plotH}" stroke="var(--text-secondary)" stroke-width="1"/>`;
+    ovLine += `<text x="${tx + 3}" y="${pad.top + 8}" fill="var(--text-secondary)" font-size="8">${getLanguage() === 'zh' ? '今天' : 'Today'}</text>`;
+  }
 
   // X axis labels
   let xLabels = '';
