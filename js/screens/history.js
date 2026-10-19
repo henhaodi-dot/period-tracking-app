@@ -24,7 +24,9 @@ export async function render(container) {
   let body;
   if (view === 'calendar') {
     const breastfeeding = !!(await db.getSetting('breastfeeding'));
-    body = renderCalendar(cycles, predictNextPeriod(cycles, breastfeeding));
+    const active = cycles.find(c => !c.endDate);
+    const activeLogs = active ? await db.getDayLogsForCycle(active.id) : [];
+    body = renderCalendar(cycles, predictNextPeriod(cycles, breastfeeding, activeLogs));
   } else {
     body = renderList(sorted);
   }
@@ -173,11 +175,10 @@ async function renderDetail(container, cycle, cycles) {
     // Active cycle: elapsed days aren't the cycle length. Chart the predicted
     // cycle with the same ovulation anchor and spread as Today, and mark today.
     const breastfeeding = !!(await db.getSetting('breastfeeding'));
-    const prediction = predictNextPeriod(cycles, breastfeeding);
-    const predictedLength = prediction ? prediction.predictedLength : 28;
+    const prediction = predictNextPeriod(cycles, breastfeeding, dayLogs);
     const cycleDay = lengthDays + 1;
-    chartSvg = renderHormoneChart(Math.max(predictedLength, cycleDay), defaultOvulationDay(predictedLength),
-      ovulationSpreadDays('low', breastfeeding), cycleDay);
+    chartSvg = renderHormoneChart(Math.max(prediction.predictedLength, cycleDay), prediction.ovulationDay,
+      ovulationSpreadDays(prediction.ovulationConfidence, breastfeeding), cycleDay);
   }
 
   container.innerHTML = `

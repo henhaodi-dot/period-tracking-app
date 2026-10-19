@@ -100,51 +100,43 @@ export function estimateOvulationActive(cycle, predictedLength) {
   return addDays(predictedEnd, -13);
 }
 
-// --- Ovulation confidence ---
+// --- Ovulation from body signs ---
+// Signs differ in how tightly they track ovulation, so they aren't averaged:
+// - Egg-white discharge follows the estrogen peak. Ovulation is most often
+//   the day after the last egg-white day (the "peak day"), within ~±2 days.
+//   Discharge turning sticky/creamy/dry after it confirms the peak.
+// - One-sided pain (mittelschmerz) falls around ovulation itself.
+// - High libido spans the whole fertile window, so it only nudges.
+// Signs before cycle day 8, or in the last 5 days of a closed cycle, are
+// ignored. Returns { date, confidence, fromSigns }.
+export function ovulationFromSigns(cycle, dayLogs, calendarDate) {
+  const maxDay = cycle.endDate ? daysBetween(cycle.startDate, cycle.endDate) - 5 : Infinity;
+  const dayOf = log => daysBetween(cycle.startDate, log.date);
+  const logs = (dayLogs || [])
+    .filter(l => dayOf(l) >= 7 && dayOf(l) <= maxDay)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const dateAt = d => addDays(cycle.startDate, d);
+  const eggWhite = logs.filter(l => l.discharge === 'egg-white').map(dayOf);
+  const pain = logs.filter(l => l.symptoms?.includes('one-sided-abdominal-pain')).map(dayOf);
 
-export function ovulationConfidence(cycle, dayLogs) {
-  if (!dayLogs || dayLogs.length === 0) {
-    return cycle.backfilled ? 'low' : 'low';
+  if (eggWhite.length) {
+    const peak = Math.max(...eggWhite);
+    const confirmed = logs.some(l => dayOf(l) > peak && dayOf(l) <= peak + 3 && l.discharge && l.discharge !== 'egg-white');
+    let ov = peak + 1;
+    const nearPain = pain.filter(d => d >= peak - 1 && d <= peak + 3);
+    if (nearPain.length) ov = Math.round((ov + nearPain[nearPain.length - 1]) / 2);
+    return { date: dateAt(ov), confidence: confirmed ? 'high' : 'medium', fromSigns: true };
   }
-  const markers = [];
-  for (const log of dayLogs) {
-    if (log.discharge === 'egg-white') markers.push(log.date);
-    if (log.symptoms && log.symptoms.includes('one-sided-abdominal-pain')) markers.push(log.date);
-    if (log.mood && log.mood.includes('libido-high')) markers.push(log.date);
+  if (pain.length) {
+    return { date: dateAt(pain[pain.length - 1]), confidence: 'medium', fromSigns: true };
   }
-  if (markers.length === 0) return 'low';
-  if (markers.length === 1) return 'medium';
-  return 'high';
-}
-
-// --- Symptom-informed ovulation nudge ---
-
-export function nudgeOvulation(baseEstimate, dayLogs, cycle) {
-  if (!baseEstimate || !dayLogs || dayLogs.length === 0) return baseEstimate;
-
-  const markerDates = [];
-  for (const log of dayLogs) {
-    let score = 0;
-    if (log.discharge === 'egg-white') score++;
-    if (log.symptoms && log.symptoms.includes('one-sided-abdominal-pain')) score++;
-    if (log.mood && log.mood.includes('libido-high')) score++;
-    if (score > 0) markerDates.push({ date: log.date, score });
+  const libido = logs.filter(l => l.mood?.includes('libido-high')).map(dayOf);
+  if (libido.length && calendarDate) {
+    const mean = libido.reduce((a, b) => a + b, 0) / libido.length;
+    const nudged = Math.round(daysBetween(cycle.startDate, calendarDate) * 0.75 + mean * 0.25);
+    return { date: dateAt(nudged), confidence: 'low', fromSigns: false };
   }
-  if (markerDates.length === 0) return baseEstimate;
-
-  const baseDay = daysBetween(cycle.startDate, baseEstimate);
-  let wSum = 0, wTotal = 0;
-  for (const m of markerDates) {
-    const d = daysBetween(cycle.startDate, m.date);
-    if (d < 8 || d > (cycle.lengthDays || 40) - 5) continue;
-    wSum += d * m.score;
-    wTotal += m.score;
-  }
-  if (wTotal === 0) return baseEstimate;
-
-  const markerDay = wSum / wTotal;
-  const nudged = Math.round(baseDay * 0.6 + markerDay * 0.4);
-  return addDays(cycle.startDate, nudged);
+  return { date: calendarDate, confidence: 'low', fromSigns: false };
 }
 
 // --- Retrospective re-anchoring ---
@@ -154,18 +146,17 @@ export function reanchorCycle(cycle, dayLogs) {
   const baseOv = estimateOvulation(cycle);
   if (!baseOv) return cycle;
 
-  const nudged = nudgeOvulation(baseOv, dayLogs, cycle);
-  const conf = ovulationConfidence(cycle, dayLogs);
+  const { date: ov, confidence } = ovulationFromSigns(cycle, dayLogs, baseOv);
   const lengthDays = daysBetween(cycle.startDate, cycle.endDate);
 
-  const lutealLength = daysBetween(nudged, cycle.endDate);
+  const lutealLength = daysBetween(ov, cycle.endDate);
   const anovulatory = lutealLength < 8 || lutealLength > 18;
 
   return {
     ...cycle,
     lengthDays,
-    estimatedOvulation: nudged,
-    ovulationConfidence: conf,
+    estimatedOvulation: ov,
+    ovulationConfidence: confidence,
     anovulatorySuspected: anovulatory
   };
 }
@@ -261,7 +252,7 @@ export function calendarMarks(cycles, prediction, todayStr = today()) {
     }
     const ov = c.endDate
       ? c.estimatedOvulation
-      : prediction && estimateOvulationActive(c, prediction.predictedLength);
+      : prediction?.ovulationDate;
     if (ov) mark(ov, { ovulation: true });
   });
 
@@ -307,25 +298,38 @@ export function getPhaseName(phase) {
 
 // --- Next period prediction ---
 
-export function predictNextPeriod(cycles, breastfeeding) {
+// activeLogs: day logs of the active cycle, used to place ovulation from
+// body signs. Once signs place it, the next period is predicted 13 days after
+// ovulation (the luteal phase varies far less than the follicular phase),
+// with a tighter band.
+export function predictNextPeriod(cycles, breastfeeding, activeLogs = []) {
   const intervals = getClosedIntervals(cycles);
-  const { predicted, confidence } = predictCycleLength(intervals);
-  const band = uncertaintyBand(intervals, breastfeeding);
+  const { predicted, confidence: lengthConfidence } = predictCycleLength(intervals);
+  let band = uncertaintyBand(intervals, breastfeeding);
 
   const activeCycle = cycles.find(c => !c.endDate);
   if (!activeCycle) return null;
 
-  const expectedDate = addDays(activeCycle.startDate, predicted);
-  const earliest = addDays(expectedDate, -band);
-  const latest = addDays(expectedDate, band);
+  const ov = ovulationFromSigns(activeCycle, activeLogs, estimateOvulationActive(activeCycle, predicted));
+  let expectedDate = addDays(activeCycle.startDate, predicted);
+  let confidence = lengthConfidence;
+  if (ov.fromSigns) {
+    expectedDate = addDays(ov.date, 13);
+    band = Math.min(band, ov.confidence === 'high' ? 2 : 3);
+    const rank = ['none', 'low', 'medium', 'high'];
+    if (rank.indexOf(ov.confidence) > rank.indexOf(confidence)) confidence = ov.confidence;
+  }
 
   return {
     expectedDate,
-    earliest,
-    latest,
+    earliest: addDays(expectedDate, -band),
+    latest: addDays(expectedDate, band),
     band,
-    predictedLength: predicted,
+    predictedLength: daysBetween(activeCycle.startDate, expectedDate),
     confidence,
-    intervalCount: intervals.length
+    intervalCount: intervals.length,
+    ovulationDate: ov.date,
+    ovulationDay: daysBetween(activeCycle.startDate, ov.date) + 1,
+    ovulationConfidence: ov.confidence
   };
 }

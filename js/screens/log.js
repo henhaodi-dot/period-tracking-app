@@ -69,9 +69,9 @@ export async function render(container) {
   const existing = await db.getDayLog(todayStr);
 
   const cycleDay = activeCycle ? daysBetween(activeCycle.startDate, todayStr) + 1 : null;
-  const prediction = activeCycle ? predictNextPeriod(cycles, breastfeeding) : null;
+  const prediction = activeCycle ? predictNextPeriod(cycles, breastfeeding, await db.getDayLogsForCycle(activeCycle.id)) : null;
   const predictedLength = prediction ? prediction.predictedLength : 28;
-  const ovDayNum = activeCycle ? defaultOvulationDay(predictedLength) : 14;
+  const ovDayNum = prediction ? prediction.ovulationDay : 14;
   const phase = cycleDay ? getPhase(cycleDay, ovDayNum, predictedLength, periodLengthDays(activeCycle)) : 'follicular';
 
   log = existing || {

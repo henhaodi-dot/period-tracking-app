@@ -30,13 +30,11 @@ export async function render(container) {
 
   const todayStr = today();
   const cycleDay = daysBetween(activeCycle.startDate, todayStr) + 1;
-  const prediction = predictNextPeriod(cycles, breastfeeding);
-  const predictedLength = prediction ? prediction.predictedLength : 28;
-  const ovDay = estimateOvulationActive(activeCycle, predictedLength);
-  const ovDayNum = ovDay ? daysBetween(activeCycle.startDate, ovDay) + 1 : defaultOvulationDay(predictedLength);
+  const prediction = predictNextPeriod(cycles, breastfeeding, await db.getDayLogsForCycle(activeCycle.id));
+  const predictedLength = prediction.predictedLength;
+  const ovDayNum = prediction.ovulationDay;
   const phase = getPhase(cycleDay, ovDayNum, predictedLength, periodLengthDays(activeCycle));
-  // The active-cycle estimate is calendar-only (no marker nudge), so 'low'.
-  const hormones = getHormoneLevels(cycleDay, ovDayNum, predictedLength, ovulationSpreadDays('low', breastfeeding));
+  const hormones = getHormoneLevels(cycleDay, ovDayNum, predictedLength, ovulationSpreadDays(prediction.ovulationConfidence, breastfeeding));
 
   const todayLog = await db.getDayLog(todayStr);
   const nursing = todayLog?.context?.nursingSessions;
