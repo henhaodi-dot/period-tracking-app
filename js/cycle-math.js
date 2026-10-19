@@ -232,6 +232,44 @@ export function typicalPeriodLength(cycles) {
   return Math.round(lengths.reduce((a, b) => a + b, 0) / lengths.length);
 }
 
+// --- Cycle statistics (Explore) ---
+// Reference ranges from FIGO 2018 (normal uterine bleeding parameters):
+// cycle 24–38 days; shortest-to-longest spread ≤7 days is regular (≤9 is
+// within normal for under 26 / over 41); bleeding up to 8 days.
+export const CYCLE_REFERENCE = { lengthMin: 24, lengthMax: 38, regularSpread: 7, regularSpreadLoose: 9, periodMax: 8 };
+
+// Over the most recent `limit` closed cycles (excluded ones left out).
+// Backfilled cycles count: their dates are as good as live-logged ones.
+export function cycleStats(cycles, limit = 12) {
+  const byStart = (a, b) => a.startDate.localeCompare(b.startDate);
+  const series = cycles
+    .filter(c => c.endDate && !c.excludeFromStats)
+    .sort(byStart)
+    .slice(-limit)
+    .map(c => ({ id: c.id, startDate: c.startDate, length: c.lengthDays || daysBetween(c.startDate, c.endDate) }));
+  // Period length is known once its end is recorded, even in the active cycle.
+  const periodSeries = cycles
+    .filter(c => c.periodEnd && !c.excludeFromStats)
+    .sort(byStart)
+    .slice(-limit)
+    .map(c => ({ id: c.id, startDate: c.startDate, length: periodLengthDays(c) }));
+
+  const summary = values => values.length ? {
+    avg: Math.round(values.reduce((a, b) => a + b, 0) / values.length * 10) / 10,
+    min: Math.min(...values),
+    max: Math.max(...values)
+  } : null;
+
+  const length = summary(series.map(s => s.length));
+  return {
+    series,
+    periodSeries,
+    length,
+    spread: series.length >= 3 ? length.max - length.min : null,
+    period: summary(periodSeries.map(s => s.length))
+  };
+}
+
 // --- Calendar marks ---
 // date -> { period: 'recorded' | 'estimated' | 'predicted', cycleId, ovulation }
 // A period without a recorded end shows its start as recorded and the
